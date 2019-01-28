@@ -24,6 +24,7 @@ import guillotine._
 import mercator._
 import kaleidoscope._
 
+import scala.annotation.tailrec
 import scala.collection.immutable.{SortedSet, TreeSet}
 import scala.collection.mutable.HashMap
 import scala.concurrent.ExecutionContext.Implicits.global
@@ -251,10 +252,41 @@ case class Universe(
 
   def transitiveDependencies(io: Io, ref: ModuleRef, layout: Layout): Outcome[Set[Artifact]] =
     for {
-      after  <- dependencies(io, ref, layout)
-      tDeps  <- after.map(_.ref).map(transitiveDependencies(io, _, layout)).sequence
-      itDeps = tDeps.flatten
-    } yield after ++ itDeps
+      graph <- getDependencyGraph(ref)
+      descendants <- graph
+                      .allDescendants(ref)
+                      .fold(cycle => Failure(CyclesInDependencies(cycle)), Success(_))
+      artifacts <- descendants.map(artifact(io, _, layout)).sequence
+    } yield artifacts
+
+  @tailrec
+  final def addToMap[A, B](l: Map[A, Set[B]], r: Traversable[(A, B)]): Map[A, Set[B]] =
+    r match {
+      case List()               => l
+      case (key, value) :: tail => addToMap(l.updated(key, l.getOrElse(key, Set()) + value), tail)
+    }
+
+  def getDependencyGraph(ref: ModuleRef): Try[DirectedGraph[ModuleRef]] = {
+    def getGraphHelper(
+        graph: DirectedGraph[ModuleRef],
+        queue: List[ModuleRef]
+      ): Try[DirectedGraph[ModuleRef]] =
+      queue match {
+        case List() => ~graph
+        case ref :: tail =>
+          for {
+            project            <- project(ref.projectId)
+            module             <- project(ref.moduleId)
+            deps               = module.after
+            newConnections     = addToMap(graph.connections, deps.toList.map(x => (ref, x)))
+            vertices           = graph.connections.keys.toList
+            newGraph           = DirectedGraph(newConnections)
+            notVisitedVertices = deps.diff(vertices.toSet)
+            ans                <- getGraphHelper(newGraph, tail ++ notVisitedVertices)
+          } yield ans
+      }
+    getGraphHelper(DirectedGraph(Map()), List(ref))
+  }
 
   def clean(ref: ModuleRef, layout: Layout): Unit =
     layout.classesDir.delete().unit

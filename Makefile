@@ -107,7 +107,7 @@ dist/bundle/bin/ng: dist/bundle/bin
 ########################
 DOCKER_TAG=fury-ci
 
-test-cases=ogdl
+test-cases=ogdl core
 test-targets=$(foreach dep, $(test-cases), $(dep)-test)
 .PHONY: $(test-targets)
 
