@@ -333,13 +333,21 @@ case class Universe(
           val out = new StringBuilder()
           multiplexer(artifact.ref) = StartCompile(artifact.ref)
 
-          val compileResult: Boolean = blocking {
-            layout.shell.bloop
-              .compile(artifact.hash.encoded) { ln =>
-                out.append(ln)
-                out.append("\n")
-              }
-              .await() == 0
+          val compileResult: Boolean = try {
+            blocking {
+              layout.shell.bloop
+                .compile(artifact.hash.encoded) { ln =>
+                  out.append(ln)
+                  out.append("\n")
+                }
+                .await() == 0
+            }
+          } catch {
+            case e => {
+              io.println(e.getClass.toString ++ ": " ++ e.getMessage)
+              io.println(e.getStackTrace.mkString("\n"))
+              false
+            }
           }
 
           val finalResult = if (compileResult && artifact.kind == Application) {
